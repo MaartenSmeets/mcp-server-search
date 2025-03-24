@@ -14,14 +14,29 @@ An MCP (Model Context Protocol) server that provides Google search functionality
 ### Using Docker (Recommended)
 
 1. Build the Docker image:
-   ```
+   ```bash
    docker build -t mcp-server-search .
    ```
 
-2. Run the container:
+2. Create required directories for persistence:
+   ```bash
+   mkdir -p ./logs ./cache
    ```
-   docker run -v $(pwd)/logs:/app/logs -v $(pwd)/cache:/app/cache mcp-server-search
+
+3. Run the container:
+   ```bash
+   docker run --rm -i \
+     -v "$(pwd)/logs:/app/logs" \
+     -v "$(pwd)/cache:/app/cache" \
+     mcp-server-search
    ```
+
+The volumes ensure:
+- Logs are persisted to `./logs` directory
+- Search cache is persisted to `./cache` directory
+- Both directories are automatically created by Docker if they don't exist
+
+Note: The `-i` flag is required for MCP protocol communication, and `--rm` automatically removes the container when it exits.
 
 ### Cline Integration
 
@@ -30,7 +45,7 @@ To use this MCP server with Cline, add the following configuration to your Cline
 ```json
 {
     "mcpServers": {
-        "search": {
+        "google_search": {
             "command": "docker",
             "args": [
                 "run",
@@ -56,11 +71,11 @@ This configuration:
 
 The server accepts the following command-line arguments:
 
-- `--log-level`: Set the logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-- `--log-file`: Path to log file (logs to stderr by default)
-- `--cache-path`: Path to the search cache file
-- `--request-delay`: Delay between search requests in seconds
-- `--max-retries`: Maximum number of retries for failed searches
+- `--log-level`: Set the logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL). Default: INFO
+- `--log-file`: Path to log file (default: stdout)
+- `--cache-path`: Path to the search cache file (default: cache/google_cache.db)
+- `--request-delay`: Delay between search requests in seconds (default: 5)
+- `--max-retries`: Maximum number of retries for failed searches (default: 3)
 
 ## Usage
 
@@ -68,21 +83,27 @@ The server exposes the following MCP endpoints:
 
 ### Tools
 
-- `google_search`: Search Google and return results
+- `google_search`: Search Google and return results. Results are presented in a formatted Markdown structure with titles, URLs, and descriptions (when enabled).
 
   Parameters:
-  - `query` (string, required): The search query
-  - `num_results` (integer, optional): Number of results to return (1-20, default: 5)
-  - `use_cache` (boolean, optional): Whether to use cached results (default: true)
-  - `include_descriptions` (boolean, optional): Whether to include descriptions (default: true)
+  - `query` (string, required): The search query to execute
+  - `num_results` (integer, optional): Number of results to return (min: 1, max: 20, default: 5)
+  - `use_cache` (boolean, optional): Whether to use cached results if available (default: true)
+  - `include_descriptions` (boolean, optional): Whether to include descriptions in results (default: true)
+
+  Features:
+  - Automatic request throttling and retry mechanism
+  - Random user agent rotation for better request distribution
+  - File-based caching with thread-safe access
+  - Exponential backoff on rate limiting (HTTP 429)
 
 ### Prompts
 
-- `google_search`: Search Google with the given query
+- `google_search`: Search Google with the given query. Returns results in a conversational format.
 
   Parameters:
-  - `query` (string, required): The search query
-  - `num_results` (integer, optional): Number of results to return (default: 5)
+  - `query` (string, required): The search query to execute
+  - `num_results` (integer, optional): Number of results to return (1-20, default: 5)
 
 ## About MCP
 

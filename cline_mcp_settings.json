@@ -1,0 +1,15 @@
+{
+    "mcpServers": {
+        "google_search": {
+            "command": "docker",
+            "args": [
+                "run",
+                "--rm",
+                "-i",
+                "mcp-server-search"
+            ],
+            "disabled": false,
+            "alwaysAllow": []
+        }
+    }
+}

@@ -158,16 +158,21 @@ async def serve(
     log_level: str = "INFO",
     cache_path: str = "cache/google_cache.db",
     request_delay: int = 5,
-    max_retries: int = 3
+    max_retries: int = 3,
 ) -> None:
-    if not logging.getLogger().handlers:
-        numeric_level = getattr(logging, log_level.upper(), logging.INFO)
-        logging.basicConfig(
-            level=numeric_level,
-            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-            stream=sys.stderr
-        )
-    
+    # Use the log_level passed as an argument
+    numeric_log_level = getattr(logging, log_level.upper(), logging.INFO)
+    logging.basicConfig(
+        level=numeric_log_level,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        stream=sys.stderr,
+        force=True # Override existing config if any
+    )
+    # Set the level for the root logger and the specific mcp-search logger
+    logging.getLogger().setLevel(numeric_log_level)
+    logging.getLogger("mcp-search").setLevel(numeric_log_level)
+
+    # Log the actual level being used
     logger.info("Starting MCP Search server (log_level=%s)", log_level)
     logger.info("Cache path: %s", cache_path)
     logger.info("Request delay: %s s, Max retries: %s", request_delay, max_retries)
@@ -340,18 +345,52 @@ async def serve(
     options = server.create_initialization_options()
     logger.info("Server initialized with options: %s", options)
     
+
+    logger.debug("Entering main try block for server execution.")
     try:
+        logger.debug("Entering stdio_server context manager...")
         async with stdio_server() as (read_stream, write_stream):
-            logger.info("Starting stdio server")
-            try:
-                await server.run(read_stream, write_stream, options, raise_exceptions=True)
-            except Exception as e:
-                logger.critical("Server crashed with exception: %s", str(e), exc_info=True)
-                raise
-            finally:
-                logger.info("Server shutting down")
-                search_util.close()
+            logger.info("Stdio server context acquired. read_stream=%s, write_stream=%s", read_stream, write_stream)
+            
+            server_task = asyncio.create_task(
+                server.run(read_stream, write_stream, options),
+                name="mcp_server_run"
+            )
+
+            logger.debug("Running server task...")
+            # Wait for the server task to complete or raise an error.
+            # Let stdio_server and server.run handle stream closure.
+            await server_task
+
+
+        logger.debug("Exited stdio_server context manager block.")
+
     except Exception as e:
-        logger.critical("Fatal error: %s", str(e), exc_info=True)
-        search_util.close()
-        raise
+        # This catches errors during stdio_server setup OR exceptions from server.run if it errors
+        logger.critical("Fatal error during server execution (outer except): %s", str(e), exc_info=True)
+        # Ensure cleanup happens even on fatal errors outside the main run loop
+        try:
+            if not getattr(_executor, '_shutdown', False): # Check if shutdown was already called
+                 logger.debug("Attempting cleanup in outer except block...")
+                 search_util.close()
+                 _executor.shutdown(wait=False, cancel_futures=True)
+                 logger.info("Thread pool shut down after fatal error (outer except)")
+            else:
+                 logger.debug("Cleanup likely already performed by server.run or stdio_server context exit.") # No change needed here, just confirming the line number
+        except Exception as cleanup_e:
+            logger.error("Error during cleanup in outer except block: %s", cleanup_e, exc_info=True)
+        raise # Re-raise the original fatal error
+    finally:
+        # This finally block might not be reached if sys.exit is called directly,
+        # but it's here for completeness in case of other exceptions.
+        logger.debug("Entering main finally block.")
+        try:
+            if not getattr(_executor, '_shutdown', False):
+                 logger.warning("Performing cleanup in main finally block (unexpected path?).")
+                 search_util.close()
+                 _executor.shutdown(wait=False, cancel_futures=True)
+                 logger.info("Thread pool shut down (main finally).")
+        except Exception as final_cleanup_e:
+            logger.error("Error during cleanup in main finally block: %s", final_cleanup_e, exc_info=True)
+
+        logger.debug("Exiting main serve function.")

@@ -6,6 +6,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     git \
+    tini \
     && rm -rf /var/lib/apt/lists/*
 
 # Create directories
@@ -31,8 +32,9 @@ RUN pip install --no-cache-dir .
 # Set up volumes for logs and cache
 VOLUME ["/app/logs", "/app/cache"]
 
-# Set the entrypoint to the installed command with logging enabled
-ENTRYPOINT ["mcp-server-search", "--log-level", "INFO", "--log-file", "/app/logs/mcp-search.log"]
+# Use tini as the entrypoint to handle signals properly
+ENTRYPOINT ["/usr/bin/tini", "--"]
 
-# Default command can be overridden
-CMD []
+# Default command to run the server (executed by tini)
+# Note: Log level is currently forced to DEBUG in server.py for diagnostics
+CMD ["mcp-server-search", "--log-level", "INFO", "--log-file", "/app/logs/mcp-search.log"]

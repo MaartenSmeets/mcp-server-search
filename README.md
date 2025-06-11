@@ -14,17 +14,17 @@ An MCP (Model Context Protocol) server that provides Google search functionality
 ### Using Docker (Recommended)
 
 1. Build the Docker image:
-   ```bash
+   ```
    docker build -t mcp-server-search .
    ```
 
 2. Create required directories for persistence:
-   ```bash
+   ```
    mkdir -p ./logs ./cache
    ```
 
 3. Run the container:
-   ```bash
+   ```
    docker run --rm -i \
      -v "$(pwd)/logs:/app/logs" \
      -v "$(pwd)/cache:/app/cache" \
@@ -46,26 +46,15 @@ To use this MCP server with Cline, add the following configuration to your Cline
 {
     "mcpServers": {
         "google_search": {
-            "command": "docker",
-            "args": [
-                "run",
-                "--rm",
-                "-i",
-                "mcp-server-search"
-            ],
-            "disabled": false,
-            "alwaysAllow": []
+            "url": "http://localhost:8000/sse"
         }
     }
 }
 ```
 
 This configuration:
-- Sets up the search MCP server to run in a Docker container
-- Uses the `--rm` flag to automatically remove the container when it exits
-- Uses `-i` for interactive mode required by the MCP protocol
-- Disables the server by default for security (set `disabled` to `false` to enable)
-- Requires explicit approval for all tool uses (`alwaysAllow` is empty)
+- Connects to the search MCP server via HTTP SSE on port 8000 at the `/sse` endpoint
+- No longer uses the Docker stdio transport; Cline connects directly to the HTTP endpoint
 
 ## Configuration
 
@@ -104,6 +93,19 @@ The server exposes the following MCP endpoints:
   Parameters:
   - `query` (string, required): The search query to execute
   - `num_results` (integer, optional): Number of results to return (1-20, default: 5)
+
+## Manual Server Start (with SSE)
+
+To manually start the server and expose the required port for SSE, run:
+
+```
+docker run --rm -p 8000:8000 \
+  -v "$(pwd)/logs:/app/logs" \
+  -v "$(pwd)/cache:/app/cache" \
+  mcp-server-search
+```
+
+This will start the server with SSE enabled and make it accessible at http://localhost:8000/sse.
 
 ## About MCP
 

@@ -32,6 +32,9 @@ RUN pip install --no-cache-dir .
 # Set up volumes for logs and cache
 VOLUME ["/app/logs", "/app/cache"]
 
+# Expose the port for the SSE
+EXPOSE 8000
+
 # Use tini as the entrypoint to handle signals properly
 ENTRYPOINT ["/usr/bin/tini", "--"]
 

@@ -167,5 +167,8 @@ def google_search_tool(query: str, num_results: int = 5, use_cache: bool = True,
     finally:
         search_util.close()
 
+def main():
+    mcp.run(transport="sse", host="0.0.0.0", port=8000)
+
 if __name__ == "__main__":
-    mcp.run()
+    main()

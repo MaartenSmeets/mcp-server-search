@@ -22,14 +22,18 @@ class FastMCPError(Exception):
         super().__init__(str(error_data))
 
 class GoogleSearchUtility:
-    def __init__(self, cache_file_path='cache/google_cache.db', request_delay=5, max_retries=3):
+    """
+    A utility class for performing Google searches with caching and retry mechanisms.
+    """
+
+    def __init__(self, cache_file_path: str = 'cache/google_cache.db', request_delay: int = 5, max_retries: int = 3):
         """
         Initialize the Google Search Utility.
-        
+
         Args:
-            cache_file_path (str): Path to cache Google search results
-            request_delay (int): Delay between requests in seconds
-            max_retries (int): Maximum number of retries for failed searches
+            cache_file_path (str): Path to cache Google search results.
+            request_delay (int): Delay between requests in seconds.
+            max_retries (int): Maximum number of retries for failed searches.
         """
         self.cache_file_path = cache_file_path
         self.request_delay = request_delay
@@ -42,14 +46,23 @@ class GoogleSearchUtility:
         logger.info("Initialized GoogleSearchUtility with cache at %s", cache_file_path)
         logger.info("Request delay: %s s, Max retries: %s", request_delay, max_retries)
 
-    def _open_cache(self):
+    def _open_cache(self) -> Optional[shelve.Shelf]:
+        """
+        Open the cache file for reading and writing.
+
+        Returns:
+            Optional[shelve.Shelf]: The opened cache file or None if an error occurs.
+        """
         try:
             return shelve.open(self.cache_file_path, writeback=True)
         except Exception as e:
             logger.error("Failed to open cache file: %s", e)
             return None
 
-    def _save_cache(self):
+    def _save_cache(self) -> None:
+        """
+        Save the cache file.
+        """
         try:
             lock_file = self.cache_file_path + '.lock'
             with portalocker.Lock(lock_file, 'w'):
@@ -58,11 +71,23 @@ class GoogleSearchUtility:
         except Exception as e:
             logger.error("Failed to save cache: %s", e)
 
-    def search_google(self, query, num_results=5, use_cache=True, include_descriptions=True):
+    def search_google(self, query: str, num_results: int = 5, use_cache: bool = True, include_descriptions: bool = True) -> List[Dict[str, Any]]:
+        """
+        Perform a Google search and return the results.
+
+        Args:
+            query (str): The search query.
+            num_results (int): The number of results to return.
+            use_cache (bool): Whether to use cached results if available.
+            include_descriptions (bool): Whether to include descriptions in results.
+
+        Returns:
+            List[Dict[str, Any]]: A list of search results.
+        """
         cache_key = f"{query}_{include_descriptions}_{num_results}"
         logger.info("Search request: '%s' (results: %s, cache: %s, descriptions: %s)",
                     query, num_results, use_cache, include_descriptions)
-        
+
         for attempt in range(self.max_retries):
             try:
                 if use_cache and self.google_cache and cache_key in self.google_cache and attempt == 0:
@@ -73,13 +98,13 @@ class GoogleSearchUtility:
                     google_user_agents.user_agents = [self.ua.random]
                     current_agent = google_user_agents.user_agents[0]
                     logger.info("Searching Google for: '%s' (User-Agent: %s...)", query, current_agent[:30])
-                    
+
                     time.sleep(self.request_delay + (random.random() * 2))
-                    
+
                     if include_descriptions:
                         search_results = list(search(
-                            query, 
-                            num_results=num_results, 
+                            query,
+                            num_results=num_results,
                             safe=None,
                             advanced=True
                         ))
@@ -93,16 +118,16 @@ class GoogleSearchUtility:
                     else:
                         urls = list(search(query, num_results=num_results, safe=None))
                         search_results = [{'url': url} for url in urls]
-                    
+
                     logger.info("Retrieved %d results from Google", len(search_results))
-                    
+
                     if self.google_cache:
                         self.google_cache[cache_key] = search_results
                         self._save_cache()
                         logger.debug("Updated cache for query: '%s'", query)
-                
+
                 return search_results[:num_results]
-            
+
             except Exception as e:
                 if hasattr(e, 'response') and e.response and e.response.status_code == 429:
                     retry_after = self.request_delay * (2 ** attempt)
@@ -112,11 +137,14 @@ class GoogleSearchUtility:
                     logger.error("Failed to search for query '%s': %s", query, str(e))
                     google_user_agents.user_agents = [self.ua.random]
                     time.sleep(self.request_delay)
-        
+
         logger.error("Exhausted retries for query: %s", query)
         return []
     
-    def close(self):
+    def close(self) -> None:
+        """
+        Close the cache file.
+        """
         if self.google_cache:
             try:
                 self.google_cache.close()
@@ -163,7 +191,13 @@ def google_search_tool(
 ) -> str:
     """
     Search Google and return structured JSON search results.
-    
+
+    Args:
+        query (str): The search query to execute.
+        num_results (int): Number of search results to return (1-20).
+        use_cache (bool): Whether to use cached results if available.
+        include_descriptions (bool): Whether to include descriptions in results.
+
     Returns:
         str: A JSON string with the following structure:
             {

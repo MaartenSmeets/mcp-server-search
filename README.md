@@ -23,13 +23,15 @@ An MCP (Model Context Protocol) server that provides Google search functionality
    mkdir -p ./logs ./cache
    ```
 
-3. Run the container:
+3. Run the container (with SSE enabled):
    ```
-   docker run --rm -i \
+   docker run --rm -p 8000:8000 \
      -v "$(pwd)/logs:/app/logs" \
      -v "$(pwd)/cache:/app/cache" \
      mcp-server-search
    ```
+
+This will start the server with SSE enabled and make it accessible at http://localhost:8000/sse.
 
 The volumes ensure:
 - Logs are persisted to `./logs` directory
@@ -93,19 +95,6 @@ The server exposes the following MCP endpoints:
   Parameters:
   - `query` (string, required): The search query to execute
   - `num_results` (integer, optional): Number of results to return (1-20, default: 5)
-
-## Manual Server Start (with SSE)
-
-To manually start the server and expose the required port for SSE, run:
-
-```
-docker run --rm -p 8000:8000 \
-  -v "$(pwd)/logs:/app/logs" \
-  -v "$(pwd)/cache:/app/cache" \
-  mcp-server-search
-```
-
-This will start the server with SSE enabled and make it accessible at http://localhost:8000/sse.
 
 ## About MCP
 

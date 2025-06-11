@@ -4,6 +4,7 @@ import time
 import os
 import shelve
 import random
+import json
 
 from fastmcp import FastMCP
 from pydantic import BaseModel, Field
@@ -142,10 +143,44 @@ class SearchParams(BaseModel):
         description="Whether to include descriptions in results"
     )]
 
-mcp = FastMCP("google_search")
+mcp = FastMCP(
+    name="google_search",
+    instructions="Provides a Google Search tool for LLMs and agents to retrieve up-to-date web results as structured JSON."
+)
 
-@mcp.tool
-def google_search_tool(query: str, num_results: int = 5, use_cache: bool = True, include_descriptions: bool = True) -> str:
+@mcp.tool(
+    description="Search Google and return up-to-date web results as structured JSON.",
+    tags={"search", "google", "web", "internet"},
+    annotations={
+        "title": "Google Search",
+        "readOnlyHint": True,
+        "openWorldHint": True
+    }
+)
+def google_search_tool(
+    query: Annotated[str, Field(description="The search query to execute")],
+    num_results: Annotated[int, Field(default=5, description="Number of search results to return (1-20)", ge=1, le=20)] = 5,
+    use_cache: Annotated[bool, Field(default=True, description="Whether to use cached results if available")] = True,
+    include_descriptions: Annotated[bool, Field(default=True, description="Whether to include descriptions in results")] = True
+) -> str:
+    """
+    Search Google and return structured JSON search results.
+    
+    Returns:
+        str: A JSON string with the following structure:
+            {
+                "query": str,                # The search query
+                "total_results": int,        # Number of results returned
+                "results": [                 # List of result objects
+                    {
+                        "title": str,       # Title of the result
+                        "url": str,         # URL of the result
+                        "description": str  # Description (if available)
+                    },
+                    ...
+                ]
+            }
+    """
     search_util = GoogleSearchUtility()
     try:
         results = search_util.search_google(
@@ -154,16 +189,18 @@ def google_search_tool(query: str, num_results: int = 5, use_cache: bool = True,
             use_cache=use_cache,
             include_descriptions=include_descriptions
         )
-        if not results:
-            return f"No search results found for: '{query}'"
-        formatted_results = f"### Search Results for: '{query}'\n\n"
-        for i, result in enumerate(results, 1):
-            formatted_results += f"#### {i}. {result.get('title', 'No title')}\n"
-            formatted_results += f"**URL:** {result.get('url', 'No URL')}\n"
-            if include_descriptions:
-                formatted_results += f"**Description:** {result.get('description', 'No description')}\n"
-            formatted_results += "\n"
-        return formatted_results
+        response = {
+            "query": query,
+            "total_results": len(results),
+            "results": []
+        }
+        for result in results:
+            response["results"].append({
+                "title": result.get('title') or 'No title',
+                "url": result.get('url') or 'No URL',
+                "description": result.get('description') or 'No description'
+            })
+        return json.dumps(response, ensure_ascii=False, indent=2)
     finally:
         search_util.close()
 

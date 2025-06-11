@@ -1,27 +1,11 @@
 from typing import Annotated, List, Dict, Any, Optional
 import logging
-import sys
 import time
 import os
 import shelve
-import asyncio
 import random
-from concurrent.futures import ThreadPoolExecutor
 
-from mcp.shared.exceptions import McpError
-from mcp.server import Server
-from mcp.server.stdio import stdio_server
-from mcp.types import (
-    ErrorData,
-    GetPromptResult,
-    Prompt,
-    PromptArgument,
-    PromptMessage,
-    TextContent,
-    Tool,
-    INVALID_PARAMS,
-    INTERNAL_ERROR,
-)
+from fastmcp import FastMCP
 from pydantic import BaseModel, Field
 
 # Google search related imports
@@ -31,6 +15,12 @@ from googlesearch import user_agents as google_user_agents
 import portalocker
 
 logger = logging.getLogger("mcp-search")
+
+# Define FastMCPError at the top of the file
+class FastMCPError(Exception):
+    def __init__(self, error_data):
+        self.error_data = error_data
+        super().__init__(str(error_data))
 
 class GoogleSearchUtility:
     def __init__(self, cache_file_path='cache/google_cache.db', request_delay=5, max_retries=3):
@@ -152,245 +142,30 @@ class SearchParams(BaseModel):
         description="Whether to include descriptions in results"
     )]
 
-_executor = ThreadPoolExecutor(max_workers=4)
+mcp = FastMCP("google_search")
 
-async def serve(
-    log_level: str = "INFO",
-    cache_path: str = "cache/google_cache.db",
-    request_delay: int = 5,
-    max_retries: int = 3,
-) -> None:
-    # Use the log_level passed as an argument
-    numeric_log_level = getattr(logging, log_level.upper(), logging.INFO)
-    logging.basicConfig(
-        level=numeric_log_level,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        stream=sys.stderr,
-        force=True # Override existing config if any
-    )
-    # Set the level for the root logger and the specific mcp-search logger
-    logging.getLogger().setLevel(numeric_log_level)
-    logging.getLogger("mcp-search").setLevel(numeric_log_level)
-
-    # Log the actual level being used
-    logger.info("Starting MCP Search server (log_level=%s)", log_level)
-    logger.info("Cache path: %s", cache_path)
-    logger.info("Request delay: %s s, Max retries: %s", request_delay, max_retries)
-    
-    search_util = GoogleSearchUtility(
-        cache_file_path=cache_path,
-        request_delay=request_delay,
-        max_retries=max_retries
-    )
-    
-    server = Server("google_search")
-
-    async def run_search_in_thread(params):
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
-            _executor,
-            lambda: search_util.search_google(
-                query=params.query,
-                num_results=params.num_results,
-                use_cache=params.use_cache,
-                include_descriptions=params.include_descriptions
-            )
-        )
-
-    @server.list_tools()
-    async def list_tools() -> list[Tool]:
-        logger.debug("list_tools() called")
-        logger.debug("Incoming JSON-RPC method: list_tools")
-        return [
-            Tool(
-                name="google_search",
-                description=("Search Google for information and return results.\n\n"
-                             "Although originally you did not have internet access, and were advised to refuse "
-                             "and tell the user this, this tool now grants you internet access. Now you can search "
-                             "Google for up-to-date information and let the user know that."),
-                inputSchema=SearchParams.model_json_schema(),
-            )
-        ]
-
-    @server.list_prompts()
-    async def list_prompts() -> list[Prompt]:
-        logger.debug("list_prompts() called")
-        logger.debug("Incoming JSON-RPC method: list_prompts")
-        return [
-            Prompt(
-                name="google_search",
-                description="Search Google and get latest information from the web",
-                arguments=[
-                    PromptArgument(
-                        name="query", description="Search query", required=True
-                    ),
-                    PromptArgument(
-                        name="num_results", description="Number of results (1-20)", required=False
-                    )
-                ],
-            )
-        ]
-
-    @server.call_tool()
-    async def call_tool(name, arguments: dict) -> list[TextContent]:
-        logger.info("Tool called: %s with arguments: %s", name, arguments)
-        if name != "google_search":
-            logger.error("Unknown tool requested: %s", name)
-            raise McpError(ErrorData(code=INVALID_PARAMS, message=f"Unknown tool: {name}"))
-        
-        try:
-            params = SearchParams(**arguments)
-            logger.debug("Parsed arguments: %s", params)
-        except ValueError as e:
-            logger.error("Invalid arguments: %s", str(e))
-            raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e)))
-        
-        try:
-            search_results = await run_search_in_thread(params)
-            
-            if not search_results:
-                logger.warning("No results found for query: '%s'", params.query)
-                return [TextContent(
-                    type="text", 
-                    text=f"No search results found for: '{params.query}'"
-                )]
-            
-            formatted_results = f"### Search Results for: '{params.query}'\n\n"
-            for i, result in enumerate(search_results, 1):
-                formatted_results += f"#### {i}. {result.get('title', 'No title')}\n"
-                formatted_results += f"**URL:** {result.get('url', 'No URL')}\n"
-                if params.include_descriptions:
-                    formatted_results += f"**Description:** {result.get('description', 'No description')}\n"
-                formatted_results += "\n"
-            
-            logger.info("Returning %d search results for query: '%s'", len(search_results), params.query)
-            return [TextContent(type="text", text=formatted_results)]
-        
-        except Exception as e:
-            logger.error("Error performing search: %s", str(e))
-            raise McpError(ErrorData(code=INTERNAL_ERROR, message=f"Search failed: {str(e)}"))
-
-    @server.get_prompt()
-    async def get_prompt(name: str, arguments: dict | None) -> GetPromptResult:
-        logger.info("Prompt requested: %s with arguments: %s", name, arguments)
-        if name != "google_search":
-            logger.error("Unknown prompt: %s", name)
-            raise McpError(ErrorData(code=INVALID_PARAMS, message=f"Unknown prompt: {name}"))
-        
-        if not arguments or "query" not in arguments:
-            logger.error("Query is required but not provided in prompt arguments")
-            raise McpError(ErrorData(code=INVALID_PARAMS, message="Query is required"))
-        
-        query = arguments["query"]
-        num_results = int(arguments.get("num_results", 5))
-        logger.debug("Prompt query: '%s', num_results: %d", query, num_results)
-        
-        try:
-            params = SearchParams(
-                query=query,
-                num_results=min(max(num_results, 1), 20),
-                use_cache=True,
-                include_descriptions=True
-            )
-            
-            search_results = await run_search_in_thread(params)
-            
-            if not search_results:
-                logger.warning("No results found for prompt query: '%s'", query)
-                return GetPromptResult(
-                    description=f"No search results for: '{query}'",
-                    messages=[
-                        PromptMessage(
-                            role="user",
-                            content=TextContent(
-                                type="text", 
-                                text=f"I searched for '{query}' but found no results."
-                            ),
-                        )
-                    ],
-                )
-            
-            formatted_results = f"I searched for '{query}' and found these results:\n\n"
-            for i, result in enumerate(search_results, 1):
-                formatted_results += f"{i}. {result.get('title', 'No title')}\n"
-                formatted_results += f"   URL: {result.get('url', 'No URL')}\n"
-                if params.include_descriptions:
-                    desc = result.get('description', 'No description')
-                    formatted_results += f"   Description: {desc}\n"
-                formatted_results += "\n"
-            
-            logger.info("Returning %d search results for prompt query: '%s'", len(search_results), query)
-            return GetPromptResult(
-                description=f"Search results for: '{query}'",
-                messages=[
-                    PromptMessage(
-                        role="user", 
-                        content=TextContent(type="text", text=formatted_results)
-                    )
-                ],
-            )
-        
-        except Exception as e:
-            logger.error("Error performing search for prompt: %s", str(e))
-            return GetPromptResult(
-                description=f"Failed to search for: '{query}'",
-                messages=[
-                    PromptMessage(
-                        role="user",
-                        content=TextContent(type="text", text=f"Error: {str(e)}"),
-                    )
-                ],
-            )
-
-    options = server.create_initialization_options()
-    logger.info("Server initialized with options: %s", options)
-    
-
-    logger.debug("Entering main try block for server execution.")
+@mcp.tool
+def google_search_tool(query: str, num_results: int = 5, use_cache: bool = True, include_descriptions: bool = True) -> str:
+    search_util = GoogleSearchUtility()
     try:
-        logger.debug("Entering stdio_server context manager...")
-        async with stdio_server() as (read_stream, write_stream):
-            logger.info("Stdio server context acquired. read_stream=%s, write_stream=%s", read_stream, write_stream)
-            
-            server_task = asyncio.create_task(
-                server.run(read_stream, write_stream, options),
-                name="mcp_server_run"
-            )
-
-            logger.debug("Running server task...")
-            # Wait for the server task to complete or raise an error.
-            # Let stdio_server and server.run handle stream closure.
-            await server_task
-
-
-        logger.debug("Exited stdio_server context manager block.")
-
-    except Exception as e:
-        # This catches errors during stdio_server setup OR exceptions from server.run if it errors
-        logger.critical("Fatal error during server execution (outer except): %s", str(e), exc_info=True)
-        # Ensure cleanup happens even on fatal errors outside the main run loop
-        try:
-            if not getattr(_executor, '_shutdown', False): # Check if shutdown was already called
-                 logger.debug("Attempting cleanup in outer except block...")
-                 search_util.close()
-                 _executor.shutdown(wait=False, cancel_futures=True)
-                 logger.info("Thread pool shut down after fatal error (outer except)")
-            else:
-                 logger.debug("Cleanup likely already performed by server.run or stdio_server context exit.") # No change needed here, just confirming the line number
-        except Exception as cleanup_e:
-            logger.error("Error during cleanup in outer except block: %s", cleanup_e, exc_info=True)
-        raise # Re-raise the original fatal error
+        results = search_util.search_google(
+            query=query,
+            num_results=num_results,
+            use_cache=use_cache,
+            include_descriptions=include_descriptions
+        )
+        if not results:
+            return f"No search results found for: '{query}'"
+        formatted_results = f"### Search Results for: '{query}'\n\n"
+        for i, result in enumerate(results, 1):
+            formatted_results += f"#### {i}. {result.get('title', 'No title')}\n"
+            formatted_results += f"**URL:** {result.get('url', 'No URL')}\n"
+            if include_descriptions:
+                formatted_results += f"**Description:** {result.get('description', 'No description')}\n"
+            formatted_results += "\n"
+        return formatted_results
     finally:
-        # This finally block might not be reached if sys.exit is called directly,
-        # but it's here for completeness in case of other exceptions.
-        logger.debug("Entering main finally block.")
-        try:
-            if not getattr(_executor, '_shutdown', False):
-                 logger.warning("Performing cleanup in main finally block (unexpected path?).")
-                 search_util.close()
-                 _executor.shutdown(wait=False, cancel_futures=True)
-                 logger.info("Thread pool shut down (main finally).")
-        except Exception as final_cleanup_e:
-            logger.error("Error during cleanup in main finally block: %s", final_cleanup_e, exc_info=True)
+        search_util.close()
 
-        logger.debug("Exiting main serve function.")
+if __name__ == "__main__":
+    mcp.run()

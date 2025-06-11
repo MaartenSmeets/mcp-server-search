@@ -36,4 +36,4 @@ VOLUME ["/app/logs", "/app/cache"]
 ENTRYPOINT ["/usr/bin/tini", "--"]
 
 # Default command to run the server (executed by tini)
-CMD ["mcp-server-search", "--log-level", "INFO", "--log-file", "/app/logs/mcp-search.log"]
+CMD ["mcp-server-search"]

@@ -8,3 +8,7 @@ portalocker==2.8.2
 
 # Additional utilities
 pydantic>=2.0.0
+
+# FastAPI and Uvicorn for API serving
+fastapi
+uvicorn

@@ -8,11 +8,9 @@ import json
 
 from fastmcp import FastMCP
 from pydantic import BaseModel, Field
-
-# Google search related imports
-from fake_useragent import UserAgent
 from googlesearch import search
 from googlesearch import user_agents as google_user_agents
+from fake_useragent import UserAgent
 import portalocker
 
 logger = logging.getLogger("mcp-search")
@@ -204,8 +202,18 @@ def google_search_tool(
     finally:
         search_util.close()
 
-def main():
-    mcp.run(transport="sse", host="0.0.0.0", port=8000)
+from fastapi import APIRouter, FastAPI
 
-if __name__ == "__main__":
-    main()
+health_router = APIRouter()
+
+@health_router.get("/health")
+async def health():
+    return {"status": "ok"}
+
+# Create FastAPI app and mount MCP as ASGI app
+app = FastAPI()
+app.include_router(health_router)
+app.mount("/", mcp.sse_app())
+
+# Alias for Uvicorn entrypoint
+api = app

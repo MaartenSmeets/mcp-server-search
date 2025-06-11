@@ -12,10 +12,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Create directories
 RUN mkdir -p /app/logs /app/cache
 
-# Create a virtual environment
-RUN python -m venv .venv
-ENV PATH="/app/.venv/bin:$PATH"
-
 # Upgrade pip
 RUN pip install --upgrade pip
 
@@ -35,8 +31,5 @@ VOLUME ["/app/logs", "/app/cache"]
 # Expose the port for the SSE
 EXPOSE 8000
 
-# Use tini as the entrypoint to handle signals properly
-ENTRYPOINT ["/usr/bin/tini", "--"]
-
-# Default command to run the server (executed by tini)
-CMD ["mcp-server-search"]
+# Use Uvicorn to run the FastAPI app for MCP and health endpoint
+CMD ["uvicorn", "mcp_server_search.server:api", "--host", "0.0.0.0", "--port", "8000"]

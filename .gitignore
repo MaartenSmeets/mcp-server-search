@@ -172,3 +172,5 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+cache/google_cache.db
+cache/google_cache.db.lock
